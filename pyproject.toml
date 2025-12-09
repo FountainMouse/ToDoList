@@ -1,0 +1,32 @@
+[tool.poetry]
+name = "todo-cli"
+version = "0.1.0"
+description = "ToDoList Phase1 - InMemory OOP CLI"
+authors = ["Setareh Hojjaty Shargh <fhojjaty00@gmail.com>"]
+readme = "README.md"
+packages = [{include = "todo_cli", from = "."}]
+
+[tool.poetry.dependencies]
+python = ">=3.12"
+python-dotenv =">=1.1.1,<2.0.0"
+sqlalchemy = "^2.0.44"
+alembic = "^1.17.2"
+psycopg2-binary = "^2.9.11"
+schedule = "^1.2.2"
+fastapi = "^0.122.0"
+uvicorn = "^0.38.0"
+pydantic = "^2.12.5"
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.0.1"
+black = "^25.11.0"
+flake8 = "^7.3.0"
+pytest-cov = "^7.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+todo = "todo_list.cli.main:main"
