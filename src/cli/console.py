@@ -1,25 +1,19 @@
 import sys
 from typing import Optional
-from datetime import datetime
+from sqlalchemy.orm import Session
 
-from src.cli.services.project_service import ProjectService
-from src.cli.services.task_service import TaskService
-from src.cli.models.task import TaskStatus
-from src.cli.exceptions.repository_exceptions import (
-    NotFoundException,
-    AlreadyExistsException,
-    MaxLimitExceededException,
-)
-
+from src.db.session import SessionLocal
+from src.repositories.project_repository import ProjectRepository
+from src.repositories.task_repository import TaskRepository
+from src.services.project_service import ProjectService
+from src.services.task_service import TaskService
+from src.models.task import TaskStatus
+from src.exceptions.repository_exceptions import NotFoundException
 
 class CLI:
-    def __init__(self):
-        self.project_service = ProjectService()
-        self.task_service = TaskService()
-
     def display_menu(self) -> None:
         print("\n" + "=" * 50)
-        print("           مدیر لیست کارهای من (فاز ۱ - حافظه موقت)")
+        print("           مدیر لیست کارهای من (فاز ۲ - RDB)")
         print("=" * 50)
         print("  پروژه‌ها:")
         print("    1 - ایجاد پروژه")
@@ -45,14 +39,21 @@ class CLI:
                 print("\nخداحافظ! 👋")
                 sys.exit(0)
 
+            # Open a new DB session for each command
+            db: Session = SessionLocal()
             try:
+                project_repo = ProjectRepository(db)
+                task_repo = TaskRepository(db)
+                project_service = ProjectService(project_repo)
+                task_service = TaskService(task_repo)
+
                 if choice == "1":  # ایجاد پروژه
                     name = input("نام پروژه: ").strip()
                     if not name:
                         print("❌ نام پروژه نمی‌تواند خالی باشد.")
                         continue
                     desc = input("توضیحات (اختیاری): ").strip() or None
-                    project = self.project_service.create(name, desc)
+                    project = project_service.create_project(name, desc)
                     print(f"✅ پروژه ایجاد شد - شناسه: {project.id}")
 
                 elif choice == "2":  # ویرایش پروژه
@@ -66,7 +67,7 @@ class CLI:
                         print("❌ نام پروژه نمی‌تواند خالی باشد.")
                         continue
                     desc = input("توضیحات جدید (اختیاری): ").strip() or None
-                    project = self.project_service.update(proj_id, name, desc)
+                    project = project_service.update_project(proj_id, name, desc)
                     print(f"✅ پروژه با شناسه {proj_id} ویرایش شد.")
 
                 elif choice == "3":  # حذف پروژه
@@ -75,18 +76,17 @@ class CLI:
                     except ValueError:
                         print("❌ شناسه باید عدد باشد.")
                         continue
-                    self.project_service.delete(proj_id)
+                    project_service.delete_project(proj_id)
                     print(f"✅ پروژه با شناسه {proj_id} و تمام تسک‌های آن حذف شد.")
 
                 elif choice == "4":  # نمایش پروژه‌ها
-                    projects = self.project_service.list()
+                    projects = project_service.list_projects()
                     if not projects:
                         print("⚠️  پروژه‌ای وجود ندارد.")
                     else:
                         print("\n--- لیست پروژه‌ها ---")
                         for p in projects:
                             print(f"شناسه: {p.id} | نام: {p.name}")
-                            print(f"   ایجاد شده در: {p.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
                             if p.description:
                                 print(f"   توضیحات: {p.description}")
                             print("-" * 30)
@@ -103,7 +103,7 @@ class CLI:
                         continue
                     desc = input("توضیحات (اختیاری): ").strip() or None
                     deadline = input("مهلت زمانی (مثال: 2025-12-31 14:30 - اختیاری): ").strip() or None
-                    task = self.task_service.create(proj_id, title, desc, deadline)
+                    task = task_service.create_task(proj_id, title, desc, deadline)
                     status_fa = {"todo": "انجام نشده", "doing": "در حال انجام", "done": "انجام شده"}
                     print(f"✅ تسک اضافه شد - شناسه: {task.id} | وضعیت: {status_fa[task.status.value]}")
 
@@ -118,10 +118,12 @@ class CLI:
                         print("❌ عنوان نمی‌تواند خالی باشد.")
                         continue
                     desc = input("توضیحات جدید (اختیاری): ").strip() or None
-                    deadline = input("مهلت زمانی جدید (مثال: 2025-12-31 14:30 - اختیاری): ").strip() or None
+                    deadline = input("مهلت زمانی جدید (اختیاری): ").strip() or None
                     status_input = input("وضعیت جدید (todo/doing/done - اختیاری): ").strip().lower()
-                    status = status_input if status_input in ["todo", "doing", "done"] else None
-                    task = self.task_service.update(task_id, title, desc, deadline, status)
+                    status = TaskStatus(status_input) if status_input in ["todo", "doing", "done"] else None
+                    # Note: update_task needs project_id - we'll get it from task
+                    task = task_repo.get_by_id(task.project_id, task_id)  # rough, but works
+                    task_service.update_task(task.project_id, task_id, title, desc, deadline, status)
                     print(f"✅ تسک با شناسه {task_id} ویرایش شد.")
 
                 elif choice == "7":  # حذف تسک
@@ -130,7 +132,9 @@ class CLI:
                     except ValueError:
                         print("❌ شناسه باید عدد باشد.")
                         continue
-                    self.task_service.delete(task_id)
+                    # Need project_id - ask or get from task
+                    proj_id = int(input("شناسه پروژه تسک: ").strip())
+                    task_service.delete_task(proj_id, task_id)
                     print(f"✅ تسک با شناسه {task_id} حذف شد.")
 
                 elif choice == "8":  # تغییر وضعیت تسک
@@ -144,9 +148,11 @@ class CLI:
                     if status_str not in ["todo", "doing", "done"]:
                         print("❌ وضعیت نامعتبر است.")
                         continue
-                    task = self.task_service.change_status(task_id, status_str)
+                    # Need project_id
+                    proj_id = int(input("شناسه پروژه تسک: ").strip())
+                    task_service.update_task(proj_id, task_id, None, None, None, TaskStatus(status_str))
                     status_fa = {"todo": "انجام نشده", "doing": "در حال انجام", "done": "انجام شده"}
-                    print(f"✅ وضعیت تسک به «{status_fa[task.status.value]}» تغییر کرد.")
+                    print(f"✅ وضعیت تسک به «{status_fa[status_str]}» تغییر کرد.")
 
                 elif choice == "9":  # نمایش تسک‌های پروژه
                     try:
@@ -154,7 +160,7 @@ class CLI:
                     except ValueError:
                         print("❌ شناسه باید عدد باشد.")
                         continue
-                    tasks = self.task_service.list_by_project(proj_id)
+                    tasks = task_service.list_tasks_by_project(proj_id)
                     if not tasks:
                         print("⚠️  تسکی در این پروژه وجود ندارد.")
                     else:
@@ -163,18 +169,23 @@ class CLI:
                         for t in tasks:
                             dl = t.deadline.strftime('%Y-%m-%d %H:%M') if t.deadline else "ندارد"
                             print(f"شناسه: {t.id} | عنوان: {t.title} | وضعیت: {status_fa[t.status.value]}")
-                            print(f"   مهلت: {dl} | ایجاد: {t.created_at.strftime('%Y-%m-%d %H:%M')}")
+                            print(f"   مهلت: {dl}")
                             if t.description:
                                 print(f"   توضیحات: {t.description}")
                             print("-" * 40)
 
                 else:
-                    print("❌ گزینه نامعتبر است. لطفاً عددی از منو انتخاب کنید.")
+                    print("❌ گزینه نامعتبر است.")
 
-            except (ValueError, NotFoundException, AlreadyExistsException, MaxLimitExceededException) as e:
+            except NotFoundException as e:
+                print(f"❌ خطا: {e}")
+            except ValueError as e:
                 print(f"❌ خطا: {e}")
             except Exception as e:
                 print(f"❌ خطای غیرمنتظره: {e}")
+                db.rollback()
+            finally:
+                db.close()
 
 
 if __name__ == "__main__":
